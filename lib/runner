@@ -1,19 +1,48 @@
 #!/bin/bash
+app_dir=/app
+user_name=`stat -c %U $app_dir`
 
-set -e
-export HOME=/app
+export HOME=$app_dir
+cd $app_dir
+
+for file in .profile.d/*.sh; do
+  source $file
+done
 hash -r
-cd $HOME
 
-# Generate supervisord.conf:
-bash /build/procfile-to-supervisord /app/Procfile /app/SCALE > supervisord.conf
+function run() {
+    me=`whoami`
 
-# Create /var/log/app directory
-mkdir -p /var/log/app
+    # Change UID/GID only if current user is not /app user
+    if [ "$me" != "$user_name" ];
+    then
+        setuidgid $user_name $(eval echo "$@")
+    else
+        "$@"
+    fi
+}
 
-# Display the generated supervisord.conf:
-echo "Generated supervisord.conf:"
-cat -n supervisord.conf
+case "$(basename $0)" in
+  start)
+    chown -R $user_name:$user_name $app_dir
 
-# Start up the app:
-supervisord -c supervisord.conf
+    # Generate supervisord.conf:
+    bash procfile-to-supervisord /app/Procfile /app/SCALE > supervisord.conf
+
+    # Create /var/log/app directory
+    mkdir -p /var/log/app
+
+    # Display the generated supervisord.conf:
+    echo "Generated supervisord.conf:"
+    cat -n supervisord.conf
+
+    # Fix permissions
+    chown -R $user_name: /var/log/app supervisord.conf
+
+    # Start up the app:
+    run supervisord -c supervisord.conf
+    ;;
+  *)
+    run "$@"
+    ;;
+esac
